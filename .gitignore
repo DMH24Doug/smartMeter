@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.swp
+.env
+.env.*
+
+# Generated data
+/data/raw/
+/data/state/
+
+# Docker artifacts
+*.log

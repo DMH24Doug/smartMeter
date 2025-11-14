@@ -1,0 +1,19 @@
+apiVersion: 1
+
+datasources:
+  - name: Trino
+    type: trinodb-trino-datasource
+    access: proxy
+    orgId: 1
+    uid: trino
+    editable: true
+    jsonData:
+      catalog: hive
+      schema: smart_energy
+      useTrino: true
+    secureJsonData:
+      password: ""
+    url: http://trino:8080
+    user: admin
+    version: 1
+    isDefault: true
