@@ -1,0 +1,215 @@
+version: "3.8"
+
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    hostname: namenode
+    restart: unless-stopped
+    environment:
+      - CLUSTER_NAME=hadoop
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+      - HDFS_CONF_dfs_replication=1
+    ports:
+      - "9870:9870"
+      - "8020:8020"
+    volumes:
+      - namenode:/hadoop/dfs/name
+      - ./config/hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+      - ./config/hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
+    networks:
+      - smartgrid
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    hostname: datanode
+    restart: unless-stopped
+    depends_on:
+      - namenode
+    environment:
+      - CLUSTER_NAME=hadoop
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+    ports:
+      - "9864:9864"
+    volumes:
+      - datanode:/hadoop/dfs/data
+      - ./config/hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+      - ./config/hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
+    networks:
+      - smartgrid
+
+  hive-metastore-db:
+    image: postgres:15
+    container_name: hive-metastore-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: metastore
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hive
+    volumes:
+      - hive-metastore-db:/var/lib/postgresql/data
+    networks:
+      - smartgrid
+
+  hive-metastore:
+    image: bde2020/hive-metastore:2.3.0
+    container_name: hive-metastore
+    depends_on:
+      - hive-metastore-db
+      - namenode
+      - datanode
+    environment:
+      - METASTORE_DB_TYPE=postgres
+      - METASTORE_DB_HOST=hive-metastore-db
+      - METASTORE_DB_PORT=5432
+      - METASTORE_DB_NAME=metastore
+      - METASTORE_DB_USER=hive
+      - METASTORE_DB_PASSWORD=hive
+      - HIVE_SITE_CONF_hive_metastore_uris=thrift://hive-metastore:9083
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+    ports:
+      - "9083:9083"
+    volumes:
+      - ./config/hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+      - ./config/hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
+      - ./config/hive:/opt/hive/conf/init:ro
+    networks:
+      - smartgrid
+
+  hive-server:
+    image: bde2020/hive:2.3.0-postgresql-metastore
+    container_name: hive-server
+    depends_on:
+      - hive-metastore
+    environment:
+      - HIVE_SITE_CONF_hive_metastore_uris=thrift://hive-metastore:9083
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
+    command: /opt/hive/bin/hive --service hiveserver2 --hiveconf hive.metastore.uris=thrift://hive-metastore:9083
+    ports:
+      - "10000:10000"
+    volumes:
+      - ./config/hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
+      - ./config/hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
+    networks:
+      - smartgrid
+
+  spark-master:
+    image: bitnami/spark:3.5
+    container_name: spark-master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+    volumes:
+      - ./spark:/opt/spark/jobs:ro
+      - ./config/hadoop/core-site.xml:/opt/bitnami/spark/conf/core-site.xml:ro
+      - ./config/hadoop/hdfs-site.xml:/opt/bitnami/spark/conf/hdfs-site.xml:ro
+    networks:
+      - smartgrid
+
+  spark-worker:
+    image: bitnami/spark:3.5
+    container_name: spark-worker
+    depends_on:
+      - spark-master
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=4G
+      - SPARK_WORKER_CORES=2
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    volumes:
+      - ./config/hadoop/core-site.xml:/opt/bitnami/spark/conf/core-site.xml:ro
+      - ./config/hadoop/hdfs-site.xml:/opt/bitnami/spark/conf/hdfs-site.xml:ro
+    networks:
+      - smartgrid
+
+  spark-client:
+    image: bitnami/spark:3.5
+    container_name: spark-client
+    depends_on:
+      - spark-master
+    entrypoint: ["/bin/bash", "-c", "tail -f /dev/null"]
+    volumes:
+      - ./spark:/opt/spark/jobs:ro
+      - ./config/hadoop/core-site.xml:/opt/bitnami/spark/conf/core-site.xml:ro
+      - ./config/hadoop/hdfs-site.xml:/opt/bitnami/spark/conf/hdfs-site.xml:ro
+    networks:
+      - smartgrid
+
+  trino:
+    image: trinodb/trino:418
+    container_name: trino
+    depends_on:
+      - hive-metastore
+    environment:
+      - JAVA_TOOL_OPTIONS=-Dhive.config.resources=/etc/hadoop/conf/core-site.xml,/etc/hadoop/conf/hdfs-site.xml
+    ports:
+      - "8085:8080"
+    volumes:
+      - ./config/trino/catalog:/etc/trino/catalog:ro
+      - ./config/hadoop:/etc/hadoop/conf:ro
+    networks:
+      - smartgrid
+
+  grafana:
+    image: grafana/grafana:10.4.3
+    container_name: grafana
+    depends_on:
+      - trino
+    environment:
+      - GF_INSTALL_PLUGINS=trinodb-trino-datasource
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - smartgrid
+
+  simulator:
+    build:
+      context: ./simulator
+    container_name: simulator
+    depends_on:
+      - namenode
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./data/raw:/data/raw
+      - ./data/state:/data/state
+    command: [
+      "python",
+      "simulator.py",
+      "--output-dir",
+      "/data/raw",
+      "--metadata-file",
+      "/data/state/state.json",
+      "--hdfs-url",
+      "http://namenode:9870",
+      "--hdfs-directory",
+      "/data/raw/smartmeter"
+    ]
+    networks:
+      - smartgrid
+
+networks:
+  smartgrid:
+    driver: bridge
+
+volumes:
+  namenode:
+  datanode:
+  hive-metastore-db:
+  grafana-data:
