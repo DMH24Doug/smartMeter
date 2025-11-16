@@ -39,53 +39,66 @@ services:
     networks:
       - smartgrid
 
-  hive-metastore-db:
-    image: postgres:15
-    container_name: hive-metastore-db
+  hive-metastore-postgresql:
+    image: bde2020/hive-metastore-postgresql:2.3.0
+    container_name: hive-metastore-postgresql
     restart: unless-stopped
     environment:
-      POSTGRES_DB: metastore
-      POSTGRES_USER: hive
-      POSTGRES_PASSWORD: hive
+      - POSTGRES_DB=metastore
+      - POSTGRES_USER=hive
+      - POSTGRES_PASSWORD=hive
     volumes:
       - hive-metastore-db:/var/lib/postgresql/data
     networks:
       - smartgrid
 
   hive-metastore:
-    image: bde2020/hive-metastore:2.3.0
+    image: bde2020/hive:2.3.2-postgresql-metastore
     container_name: hive-metastore
     depends_on:
-      - hive-metastore-db
+      - hive-metastore-postgresql
       - namenode
       - datanode
+    command: /opt/hive/bin/hive --service metastore
     environment:
-      - METASTORE_DB_TYPE=postgres
-      - METASTORE_DB_HOST=hive-metastore-db
-      - METASTORE_DB_PORT=5432
-      - METASTORE_DB_NAME=metastore
-      - METASTORE_DB_USER=hive
-      - METASTORE_DB_PASSWORD=hive
-      - HIVE_SITE_CONF_hive_metastore_uris=thrift://hive-metastore:9083
+      - SERVICE_PRECONDITION=namenode:9870 datanode:9864 hive-metastore-postgresql:5432
+
+      # Metastore DB config
+      - HIVE_SITE_CONF_javax_jdo_option_ConnectionURL=jdbc:postgresql://hive-metastore-postgresql:5432/metastore
+      - HIVE_SITE_CONF_javax_jdo_option_ConnectionDriverName=org.postgresql.Driver
+      - HIVE_SITE_CONF_javax_jdo_option_ConnectionUserName=hive
+      - HIVE_SITE_CONF_javax_jdo_option_ConnectionPassword=hive
+      - HIVE_SITE_CONF_datanucleus_autoCreateSchema=false
+
+      # HDFS FS
       - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
     ports:
       - "9083:9083"
     volumes:
       - ./config/hadoop/core-site.xml:/opt/hadoop/etc/hadoop/core-site.xml:ro
       - ./config/hadoop/hdfs-site.xml:/opt/hadoop/etc/hadoop/hdfs-site.xml:ro
-      - ./config/hive:/opt/hive/conf/init:ro
     networks:
       - smartgrid
 
   hive-server:
-    image: bde2020/hive:2.3.0-postgresql-metastore
+    image: bde2020/hive:2.3.2-postgresql-metastore
     container_name: hive-server
     depends_on:
       - hive-metastore
+      - hive-metastore-postgresql
+    command: /opt/hive/bin/hive --service hiveserver2
     environment:
+      - SERVICE_PRECONDITION=hive-metastore:9083
+
+      - HIVE_SITE_CONF_javax_jdo_option_ConnectionURL=jdbc:postgresql://hive-metastore-postgresql:5432/metastore
+      - HIVE_SITE_CONF_javax_jdo_option_ConnectionDriverName=org.postgresql.Driver
+      - HIVE_SITE_CONF_javax_jdo_option_ConnectionUserName=hive
+      - HIVE_SITE_CONF_javax_jdo_option_ConnectionPassword=hive
+      - HIVE_SITE_CONF_datanucleus_autoCreateSchema=false
+
       - HIVE_SITE_CONF_hive_metastore_uris=thrift://hive-metastore:9083
+      - HIVE_SITE_CONF_hive_server2_enable_doAs=false
       - CORE_CONF_fs_defaultFS=hdfs://namenode:8020
-    command: /opt/hive/bin/hive --service hiveserver2 --hiveconf hive.metastore.uris=thrift://hive-metastore:9083
     ports:
       - "10000:10000"
     volumes:
@@ -95,54 +108,44 @@ services:
       - smartgrid
 
   spark-master:
-    image: bitnami/spark:3.5
+    image: spark:3.5.3-python3
     container_name: spark-master
-    environment:
-      - SPARK_MODE=master
-      - SPARK_RPC_AUTHENTICATION_ENABLED=no
-      - SPARK_RPC_ENCRYPTION_ENABLED=no
-      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
-      - SPARK_SSL_ENABLED=no
+    command: [ "/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master", "--host", "spark-master", "--port", "7077", "--webui-port", "8080" ]
     ports:
       - "7077:7077"
       - "8080:8080"
     volumes:
       - ./spark:/opt/spark/jobs:ro
-      - ./config/hadoop/core-site.xml:/opt/bitnami/spark/conf/core-site.xml:ro
-      - ./config/hadoop/hdfs-site.xml:/opt/bitnami/spark/conf/hdfs-site.xml:ro
+      - ./config/hadoop/core-site.xml:/opt/spark/conf/core-site.xml:ro
+      - ./config/hadoop/hdfs-site.xml:/opt/spark/conf/hdfs-site.xml:ro
     networks:
       - smartgrid
 
   spark-worker:
-    image: bitnami/spark:3.5
+    image: spark:3.5.3-python3
     container_name: spark-worker
     depends_on:
       - spark-master
+    command: [ "/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077" ]
     environment:
-      - SPARK_MODE=worker
-      - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=4G
       - SPARK_WORKER_CORES=2
-      - SPARK_RPC_AUTHENTICATION_ENABLED=no
-      - SPARK_RPC_ENCRYPTION_ENABLED=no
-      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
-      - SPARK_SSL_ENABLED=no
+      - SPARK_WORKER_MEMORY=4g
     volumes:
-      - ./config/hadoop/core-site.xml:/opt/bitnami/spark/conf/core-site.xml:ro
-      - ./config/hadoop/hdfs-site.xml:/opt/bitnami/spark/conf/hdfs-site.xml:ro
+      - ./config/hadoop/core-site.xml:/opt/spark/conf/core-site.xml:ro
+      - ./config/hadoop/hdfs-site.xml:/opt/spark/conf/hdfs-site.xml:ro
     networks:
       - smartgrid
 
   spark-client:
-    image: bitnami/spark:3.5
+    image: spark:3.5.3-python3
     container_name: spark-client
     depends_on:
       - spark-master
-    entrypoint: ["/bin/bash", "-c", "tail -f /dev/null"]
+    entrypoint: [ "bash", "-c", "tail -f /dev/null" ]
     volumes:
       - ./spark:/opt/spark/jobs:ro
-      - ./config/hadoop/core-site.xml:/opt/bitnami/spark/conf/core-site.xml:ro
-      - ./config/hadoop/hdfs-site.xml:/opt/bitnami/spark/conf/hdfs-site.xml:ro
+      - ./config/hadoop/core-site.xml:/opt/spark/conf/core-site.xml:ro
+      - ./config/hadoop/hdfs-site.xml:/opt/spark/conf/hdfs-site.xml:ro
     networks:
       - smartgrid
 
@@ -167,11 +170,14 @@ services:
     depends_on:
       - trino
     environment:
-      - GF_INSTALL_PLUGINS=trinodb-trino-datasource
+      # correct plugin id
+      - GF_INSTALL_PLUGINS=trino-datasource
+      # allow unsigned plugin just in case
+      - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=trino-datasource
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
     ports:
-      - "3000:3000"
+      - "3001:3000"
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
@@ -189,18 +195,7 @@ services:
     volumes:
       - ./data/raw:/data/raw
       - ./data/state:/data/state
-    command: [
-      "python",
-      "simulator.py",
-      "--output-dir",
-      "/data/raw",
-      "--metadata-file",
-      "/data/state/state.json",
-      "--hdfs-url",
-      "http://namenode:9870",
-      "--hdfs-directory",
-      "/data/raw/smartmeter"
-    ]
+    command: [ "--output-dir", "/data/raw", "--metadata-file", "/data/state/state.json", "--hdfs-url", "http://namenode:9870", "--hdfs-directory", "/user/dr.who/smartmeter" ]
     networks:
       - smartgrid
 
