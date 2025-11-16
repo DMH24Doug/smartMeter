@@ -44,19 +44,21 @@ Run all services:
 
 ```bash
 docker compose up -d
+```
+---
 
 Verify running containers
 
 ```bash
 docker ps
-
+```
 Expected Services
 
--hdfs-namenode
--hdfs-datanode
--hive-metastore-postgresql
--hive-metastore
--hive-server
--trino
--grafana
--simulator
+- hdfs-namenode
+- hdfs-datanode
+- hive-metastore-postgresql
+- hive-metastore
+- hive-server
+- trino
+- grafana
+- simulator
