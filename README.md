@@ -42,7 +42,7 @@ Grafana). When everything is healthy you should see the following web UIs:
 - Spark Master: http://localhost:8080
 - HiveServer2 Thrift port: `localhost:10000`
 - Trino Web UI: http://localhost:8085
-- Grafana: http://localhost:3000 (anonymous admin access enabled)
+- Grafana: http://localhost:3001 (anonymous admin access enabled)
 
 ## Smart meter simulator
 
