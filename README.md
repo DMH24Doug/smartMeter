@@ -177,6 +177,7 @@ docker exec -it spark-client /opt/spark/bin/spark-submit --master spark://spark-
 Default URL:
 - http://localhost:3001
 
+Create a new dashboard and add visualization panels using trino data source and paste the following queries for the visuals.
 ### Queries for Grafana Panels
 
 **Average Voltage**
